@@ -32,8 +32,8 @@ replication bucket first.
 
 **Deploy order:**
 
-1. `terraform-state-backend-s3-replication.yml`
-2. `terraform-state-backend-s3.yml`
+1. `state-backend-s3-replication.yml`
+2. `state-backend-s3.yml`
 
 Provision both templates in different regions within the same account
 
