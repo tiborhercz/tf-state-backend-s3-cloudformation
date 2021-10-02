@@ -9,8 +9,8 @@ and a DynamoDB table to lock the state file to prevent concurrent modifications 
 
 - S3 server-side encryption at rest
 - S3 bucket versioning
-- DynamoDB service-side encryption
-- Replication bucket in other region
+- DynamoDB server-side encryption
+- Multi region support for bucket replication
 - All public access is blocked
 - No cross-account support
 
@@ -25,7 +25,7 @@ and a DynamoDB table to lock the state file to prevent concurrent modifications 
 ---
 
 AWS CloudFormation templates cannot (without the use of StackSets) be deployed across multiple regions in one template
-that is why you will find two templates in the repo.
+that is why you will find two templates in this repository.
 
 The main (source) bucket depends on the replication (destination) bucket, and therefore you have to deploy the
 replication bucket first.
