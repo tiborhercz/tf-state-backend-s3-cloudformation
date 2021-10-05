@@ -26,12 +26,17 @@ that is why you will find two templates in this repository.
 The main (source) bucket depends on the replication (destination) bucket, and therefore you have to deploy the
 replication bucket first.
 
-**Deploy order:**
+### Deploy instructions
 
-1. `state-backend-s3-replication.yml`
-2. `state-backend-s3.yml`
+Deploy replication bucket
+```
+aws cloudformation create-stack --region <REGION-A> --stack-name terraform-state-replication-bucket --template-body file://state-backend-s3-replication.yml --capabilities CAPABILITY_IAM
+```
 
-Provision both templates in different regions within the same account
+Deploy state bucket and DynamoDB table
+```
+aws cloudformation create-stack --region <REGION-B> --stack-name terraform-state-backend --template-body file://state-backend-s3.yml --capabilities CAPABILITY_IAM
+```
 
 ## Example Terraform configuration
 
