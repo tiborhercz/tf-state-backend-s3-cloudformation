@@ -7,7 +7,7 @@ Resources:
       - roleReplication
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub tf-state-bucket-${AWS::AccountId}
+      BucketName: !Sub 'tf-state-bucket-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -24,7 +24,7 @@ Resources:
         Role: !GetAtt roleReplication.Arn
         Rules:
           - Destination:
-              Bucket: !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId} ] ]
+              Bucket: !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}' ] ]
             Id: ReplicationRule
             Prefix: ''
             Status: Enabled
@@ -91,8 +91,8 @@ Resources:
                   - 's3:GetObjectVersionForReplication'
                   - 's3:GetObjectVersionAcl'
                 Resource: # source bucket
-                  - !Join [ '', [  'arn:aws:s3:::', !Sub tf-state-bucket-${AWS::AccountId} ] ]
-                  - !Join [ '', [  'arn:aws:s3:::', !Sub tf-state-bucket-${AWS::AccountId}, '/*' ] ]
+                  - !Join [ '', [  'arn:aws:s3:::', !Sub 'tf-state-bucket-${AWS::AccountId}' ] ]
+                  - !Join [ '', [  'arn:aws:s3:::', !Sub 'tf-state-bucket-${AWS::AccountId}', '/*' ] ]
               - Effect: Allow
                 Action:
                   - 's3:ReplicateObject'
@@ -102,8 +102,8 @@ Resources:
                   - 's3:GetBucketVersioning'
                   - 's3:PutBucketVersioning'
                 Resource: # destination bucket
-                  - !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId} ] ]
-                  - !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId}, '/*' ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}' ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}', '/*' ] ]
 
   DynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -131,7 +131,7 @@ Resources:
 
 Outputs:
   TerraformStateS3BucketName:
-    Value: !Sub tf-state-bucket-${AWS::AccountId}
+    Value: !Sub 'tf-state-bucket-${AWS::AccountId}'
     Description: Name of the S3 bucket
   TerraformStateLockDynamoDBTableName:
     Value: !Sub tf-state-table-${AWS::AccountId}
