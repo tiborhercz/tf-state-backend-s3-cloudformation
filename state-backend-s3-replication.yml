@@ -1,15 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "Template for creating a S3 bucket for replication of the Terraform state source bucket"
-Parameters:
-  ReplicationS3BucketName:
-    Type: String
-    Description: "Name of the replication S3 bucket for the Terraform state"
 Resources:
   ReplicationS3Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Ref ReplicationS3BucketName
+      BucketName: !Sub tf-state-replication-bucket-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -65,5 +61,5 @@ Resources:
 
 Outputs:
   ReplicationS3BucketName:
-    Value: !Ref ReplicationS3BucketName
-    Description: Name of the S3 bucket
+    Value: !Sub tf-state-replication-bucket-${AWS::AccountId}
+    Description: Name of the S3 replication bucket

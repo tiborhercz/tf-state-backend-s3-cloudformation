@@ -1,7 +1,5 @@
 # CloudFormation: S3 state backend for Terraform
 
----
-
 CloudFormation template to provision a S3 bucket to store the `terraform.tfstate` file
 and a DynamoDB table to lock the state file to prevent concurrent modifications and state corruption.
 
@@ -22,8 +20,6 @@ and a DynamoDB table to lock the state file to prevent concurrent modifications 
 
 ## Deploy the CloudFormation Templates
 
----
-
 AWS CloudFormation templates cannot (without the use of StackSets) be deployed across multiple regions in one template
 that is why you will find two templates in this repository.
 
@@ -39,7 +35,7 @@ Provision both templates in different regions within the same account
 
 ## Example Terraform configuration
 
----
+Get the S3 bucketname and DynamoDB table name from the CloudFormation template (state-backend-s3.yml) outputs.
 
 ```terraform
 terraform {
@@ -53,3 +49,6 @@ terraform {
 }
 ```
 
+---
+
+###### Inspired by: [qtangs gist](https://gist.github.com/qtangs/c91b5f962147d8da87be947b83d80cee)

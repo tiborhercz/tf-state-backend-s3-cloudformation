@@ -1,23 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state"
-Parameters:
-  TerraformStateS3BucketName:
-    Type: String
-    Description: "Name of the S3 Terraform state bucket"
-  ReplicationS3BucketName:
-    Type: String
-    Description: "Name of the S3 replication bucket"
-  TerraformStateLockDynamoDBTableName:
-    Type: String
-    Description: "Name of the DynamoDB Table for the Terraform state lock"
 Resources:
-  TerraformStateS3Bucket:
+  S3Bucket:
     Type: AWS::S3::Bucket
     DependsOn:
       - roleReplication
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Ref TerraformStateS3BucketName
+      BucketName: !Sub tf-state-bucket-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -34,7 +24,7 @@ Resources:
         Role: !GetAtt roleReplication.Arn
         Rules:
           - Destination:
-              Bucket: !Join [ '', [ 'arn:aws:s3:::', !Ref ReplicationS3BucketName ] ]
+              Bucket: !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId} ] ]
             Id: ReplicationRule
             Prefix: ''
             Status: Enabled
@@ -42,7 +32,7 @@ Resources:
   BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref TerraformStateS3Bucket
+      Bucket: !Ref S3Bucket
       PolicyDocument:
         Statement:
         - Sid: Deny deletion of objects
@@ -50,13 +40,13 @@ Resources:
           Principal: "*"
           Action:
             - "s3:DeleteObject"
-          Resource: !Join [ '/', [ !GetAtt TerraformStateS3Bucket.Arn, '*' ] ]
+          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
         - Sid: Deny requests that do not use TLS
           Effect: Deny
           Principal: '*'
           Action:
             - "s3:*"
-          Resource: !Join [ '/', [ !GetAtt TerraformStateS3Bucket.Arn, '*' ] ]
+          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
           Condition:
             Bool:
               'aws:SecureTransport': 'false'
@@ -65,7 +55,7 @@ Resources:
           Principal: '*'
           Action:
             - "s3:PutObject"
-          Resource: !Join [ '/', [ !GetAtt TerraformStateS3Bucket.Arn, '*' ] ]
+          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
           Condition:
             # The Null-condition allows uploads without encryption information in the request
             # (i.e., requests with default S3 bucket encryption) and the
@@ -101,8 +91,8 @@ Resources:
                   - 's3:GetObjectVersionForReplication'
                   - 's3:GetObjectVersionAcl'
                 Resource: # source bucket
-                  - !Join [ '', [  'arn:aws:s3:::', !Ref TerraformStateS3BucketName ] ]
-                  - !Join [ '', [  'arn:aws:s3:::', !Ref TerraformStateS3BucketName, '/*' ] ]
+                  - !Join [ '', [  'arn:aws:s3:::', !Sub tf-state-bucket-${AWS::AccountId} ] ]
+                  - !Join [ '', [  'arn:aws:s3:::', !Sub tf-state-bucket-${AWS::AccountId}, '/*' ] ]
               - Effect: Allow
                 Action:
                   - 's3:ReplicateObject'
@@ -112,17 +102,14 @@ Resources:
                   - 's3:GetBucketVersioning'
                   - 's3:PutBucketVersioning'
                 Resource: # destination bucket
-                  - !Join [ '', [ 'arn:aws:s3:::', !Ref ReplicationS3BucketName ] ]
-                  - !Join [ '', [ 'arn:aws:s3:::', !Ref ReplicationS3BucketName, '/*' ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId} ] ]
+                  - !Join [ '', [ 'arn:aws:s3:::', !Sub tf-state-replication-bucket-${AWS::AccountId}, '/*' ] ]
 
-  TerraformStateLockDynamoDBTable:
+  DynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Ref TerraformStateLockDynamoDBTableName
-      BillingMode: PROVISIONED
-      ProvisionedThroughput:
-        ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
+      TableName: !Sub tf-state-table-${AWS::AccountId}
+      BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
@@ -144,8 +131,8 @@ Resources:
 
 Outputs:
   TerraformStateS3BucketName:
-    Value: !Ref TerraformStateS3BucketName
+    Value: !Sub tf-state-bucket-${AWS::AccountId}
     Description: Name of the S3 bucket
   TerraformStateLockDynamoDBTableName:
-    Value: !Ref TerraformStateLockDynamoDBTableName
+    Value: !Sub tf-state-table-${AWS::AccountId}
     Description: Name of the DynamoDB table
