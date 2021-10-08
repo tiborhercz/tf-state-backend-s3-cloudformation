@@ -5,7 +5,7 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub tf-state-replication-bucket-${AWS::AccountId}
+      BucketName: !Sub tf-state-replication-bucket-${AWS::AccountId}-${AWS::Region}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -61,5 +61,5 @@ Resources:
 
 Outputs:
   ReplicationS3BucketName:
-    Value: !Sub tf-state-replication-bucket-${AWS::AccountId}
+    Value: !Sub tf-state-replication-bucket-${AWS::AccountId}-${AWS::Region}
     Description: Name of the S3 replication bucket
