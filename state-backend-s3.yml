@@ -1,21 +1,21 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state"
+Description: -|
+  Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state.
 Parameters:
-  ReplicationBucketRegion:
+  KMSMasterKeyID:
     Type: String
-    Description: "The region where the Replication bucket is deployed. Example value: 'eu-west-1'"
+    Description: "KMS Master Key ID. You can specify the key ID or the Amazon Resource Name (ARN) of the CMK."
 Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
-    DependsOn:
-      - roleReplication
     DeletionPolicy: Retain
     Properties:
       BucketName: !Sub 'tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSMasterKeyID
       AccessControl: Private
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -24,14 +24,6 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
-      ReplicationConfiguration:
-        Role: !GetAtt roleReplication.Arn
-        Rules:
-          - Destination:
-              Bucket: !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}-${ReplicationBucketRegion}' ] ]
-            Id: ReplicationRule
-            Prefix: ''
-            Status: Enabled
 
   BucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -39,12 +31,6 @@ Resources:
       Bucket: !Ref S3Bucket
       PolicyDocument:
         Statement:
-        - Sid: Deny deletion of objects
-          Effect: Deny
-          Principal: "*"
-          Action:
-            - "s3:DeleteObject"
-          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
         - Sid: Deny requests that do not use TLS
           Effect: Deny
           Principal: '*'
@@ -70,44 +56,7 @@ Resources:
               s3:x-amz-server-side-encryption: false
             StringNotEqualsIfExists:
               s3:x-amz-server-side-encryption:
-                - 'AES256'
                 - 'aws:kms'
-
-  roleReplication:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: s3-replication-policy
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 's3:ListBucket'
-                  - 's3:GetReplicationConfiguration'
-                  - 's3:GetObjectVersionForReplication'
-                  - 's3:GetObjectVersionAcl'
-                Resource: # source bucket
-                  - !Join [ '', [  'arn:aws:s3:::', !Sub 'tf-state-bucket-${AWS::AccountId}-${AWS::Region}' ] ]
-                  - !Join [ '', [  'arn:aws:s3:::', !Sub 'tf-state-bucket-${AWS::AccountId}-${AWS::Region}', '/*' ] ]
-              - Effect: Allow
-                Action:
-                  - 's3:ReplicateObject'
-                  - 's3:ReplicateDelete'
-                  - 's3:ReplicateTags'
-                  - 's3:GetObjectVersionTagging'
-                  - 's3:GetBucketVersioning'
-                  - 's3:PutBucketVersioning'
-                Resource: # destination bucket
-                  - !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}-${ReplicationBucketRegion}' ] ]
-                  - !Join [ '', [ 'arn:aws:s3:::', !Sub 'tf-state-replication-bucket-${AWS::AccountId}-${ReplicationBucketRegion}', '/*' ] ]
 
   DynamoDBTable:
     Type: AWS::DynamoDB::Table
@@ -132,6 +81,56 @@ Resources:
           Value: !Ref "AWS::StackId"
         - Key: aws-cloudformation-stack-name
           Value: !Ref "AWS::StackName"
+
+  trailDataS3Bucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'tf-state-cloudtrail-bucket-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  trail:
+    Type: "AWS::CloudTrail::Trail"
+    DependsOn:
+      - trailBucketPolicy
+    Properties:
+      TrailName: !Sub "tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
+      S3BucketName: !Ref trailDataS3Bucket
+      IsLogging: true
+      EventSelectors:
+        - DataResources:
+            - Type: "AWS::S3::Object"
+              Values:
+                - !Sub "${S3Bucket.Arn}/"
+          IncludeManagementEvents: true
+          ReadWriteType: All
+
+  trailBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref trailDataS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Sid: AWSCloudTrailAclCheck
+          Effect: Allow
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action: "s3:GetBucketAcl"
+          Resource: !GetAtt trailDataS3Bucket.Arn
+        - Sid: AWSCloudTrailWrite
+          Effect: Allow
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action: "s3:PutObject"
+          Resource: !Sub "arn:aws:s3:::${trailDataS3Bucket}/AWSLogs/${AWS::AccountId}/*"
+          Condition:
+            StringEquals:
+              "s3:x-amz-acl": "bucket-owner-full-control"
+              "aws:SourceArn": !Sub "arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
 
 Outputs:
   TerraformStateS3BucketName:
