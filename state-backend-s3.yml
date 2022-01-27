@@ -1,10 +1,24 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: -|
+Description: |-
   Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state.
 Parameters:
   KMSMasterKeyID:
     Type: String
     Description: "KMS Master Key ID. You can specify the key ID or the Amazon Resource Name (ARN) of the CMK."
+  TerraformDeployRole:
+    Type: String
+    Description: "IAM role ARN. IAM role for deploying (CI/CD)"
+  TerraformAdminRole:
+    Type: String
+    Default: ""
+    Description: "IAM role ARN. Terraform admin role."
+
+Conditions:
+  isRolePresent: !Not
+    - !Equals
+        - !Ref TerraformDeployRole
+        - ""
+
 Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
@@ -31,12 +45,58 @@ Resources:
       Bucket: !Ref S3Bucket
       PolicyDocument:
         Statement:
+        - Sid: Deny all access
+          Effect: Deny
+          NotPrincipal:
+            AWS:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              - !Ref TerraformAdminRole
+          Action:
+            - "s3:*"
+          Resource:
+            - !Sub '${S3Bucket.Arn}/*'
+            - !Sub '${S3Bucket.Arn}'
+        - Sid: Allow to specific roles
+          Effect: Allow
+          Principal:
+            AWS:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              - !Ref TerraformAdminRole
+          Action:
+            - "s3:*"
+          Resource:
+            - !Sub '${S3Bucket.Arn}/*'
+            - !Sub '${S3Bucket.Arn}'
+        - !If
+          - isRolePresent
+          - Sid: Terraform deploy access
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref TerraformDeployRole
+            Action:
+              - "s3:ListBucket"
+            Resource: !Sub '${S3Bucket.Arn}'
+          - !Ref AWS::NoValue
+        - !If
+          - isRolePresent
+          - Sid: Terraform deploy access
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref TerraformDeployRole
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+            Resource: !Sub '${S3Bucket.Arn}/*'
+          - !Ref AWS::NoValue
         - Sid: Enforce MFA
           Effect: Deny
           Principal: '*'
           Action:
             - "s3:*"
-          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
+          Resource: !Sub '${S3Bucket.Arn}/*'
           Condition:
             "Null":
               aws:MultiFactorAuthAge: "true"
@@ -45,7 +105,7 @@ Resources:
           Principal: '*'
           Action:
             - "s3:*"
-          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
+          Resource: !Sub '${S3Bucket.Arn}/*'
           Condition:
             "NumericGreaterThan":
               aws:MultiFactorAuthAge: "1800"
@@ -85,7 +145,7 @@ Resources:
           Principal: '*'
           Action:
             - "s3:*"
-          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
+          Resource: !Sub '${S3Bucket.Arn}/*'
           Condition:
             Bool:
               'aws:SecureTransport': 'false'
@@ -94,13 +154,8 @@ Resources:
           Principal: '*'
           Action:
             - "s3:PutObject"
-          Resource: !Join [ '/', [ !GetAtt S3Bucket.Arn, '*' ] ]
+          Resource: !Sub '${S3Bucket.Arn}/*'
           Condition:
-            # The Null-condition allows uploads without encryption information in the request
-            # (i.e., requests with default S3 bucket encryption) and the
-            # StringNotEquals-condition denies uploads with invalid encryption information.
-            # Note that using StringNotEqualsIfExists doesn’t work for uploads without encryption information.
-            # The condition evaluates to true and denies the upload because of the Deny-effect.
             'Null':
               s3:x-amz-server-side-encryption: false
             StringNotEqualsIfExists:
@@ -175,11 +230,11 @@ Resources:
           Principal:
             Service: "cloudtrail.amazonaws.com"
           Action: "s3:PutObject"
-          Resource: !Sub "arn:aws:s3:::${trailDataS3Bucket}/AWSLogs/${AWS::AccountId}/*"
+          Resource: !Sub "arn:${AWS::Partition}:s3:::${trailDataS3Bucket}/AWSLogs/${AWS::AccountId}/*"
           Condition:
             StringEquals:
               "s3:x-amz-acl": "bucket-owner-full-control"
-              "aws:SourceArn": !Sub "arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
+              "aws:SourceArn": !Sub "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
 
 Outputs:
   TerraformStateS3BucketName:
