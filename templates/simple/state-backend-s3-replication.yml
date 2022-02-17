@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Template for creating a S3 bucket for replication of the Terraform state source bucket"
+Resources:
+  ReplicationS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub tf-state-replication-bucket-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ReplicationS3Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: Deny deletion of objects
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - "s3:DeleteObject"
+            Resource: !Join [ '/', [ !GetAtt ReplicationS3Bucket.Arn, '*' ] ]
+          - Sid: Deny requests that do not use TLS
+            Effect: Deny
+            Principal: '*'
+            Action:
+              - "s3:*"
+            Resource: !Join [ '/', [ !GetAtt ReplicationS3Bucket.Arn, '*' ] ]
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+          - Sid: Deny object uploads not using default encryption settings
+            Effect: Deny
+            Principal: '*'
+            Action:
+              - "s3:PutObject"
+            Resource: !Join [ '/', [ !GetAtt ReplicationS3Bucket.Arn, '*' ] ]
+            Condition:
+              # The Null-condition allows uploads without encryption information in the request
+              # (i.e., requests with default S3 bucket encryption) and the
+              # StringNotEquals-condition denies uploads with invalid encryption information.
+              # Note that using StringNotEqualsIfExists doesn’t work for uploads without encryption information.
+              # The condition evaluates to true and denies the upload because of the Deny-effect.
+              'Null':
+                s3:x-amz-server-side-encryption: false
+              StringNotEqualsIfExists:
+                s3:x-amz-server-side-encryption:
+                  - 'AES256'
+                  - 'aws:kms'
+
+Outputs:
+  ReplicationS3BucketName:
+    Value: !Sub tf-state-replication-bucket-${AWS::AccountId}-${AWS::Region}
+    Description: Name of the S3 replication bucket

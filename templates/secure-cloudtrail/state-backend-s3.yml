@@ -4,17 +4,24 @@ Description: |-
 Parameters:
   KMSMasterKeyID:
     Type: String
-    Description: "KMS Master Key ID. You can specify the key ID or the Amazon Resource Name (ARN) of the CMK."
+    Description: "KMS Master Key ID. You can specify the key ID or the Amazon Resource Name (ARN) of the CMK. Example: 1bcre5b2-4235-gce5-9fd5-h22e3q3g54gd"
   TerraformDeployRole:
     Type: String
     Description: "IAM role ARN. IAM role for deploying (CI/CD)"
-  TerraformAdminRole:
+  AdminRoleId:
     Type: String
-    Default: ""
-    Description: "IAM role ARN. Terraform admin role."
+    Description: "The Admin role ID. The role ID looks like: AROAEXAMPLEID. Which you can get from the AWS CLI using: aws iam get-role --role-name AWSReservedSSO_TerraformAdmin_ed4db3d613026e37"
+  EnforceMfaEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: "Enforce MFA on any action on the bucket"
 
 Conditions:
-  isRolePresent: !Not
+  isEnforceMfaEnabled: !Equals
+        - !Ref EnforceMfaEnabled
+        - "true"
+  isTfDeployRolePresent: !Not
     - !Equals
         - !Ref TerraformDeployRole
         - ""
@@ -47,69 +54,73 @@ Resources:
         Statement:
         - Sid: Deny all access
           Effect: Deny
-          NotPrincipal:
-            AWS:
-              - !Sub "arn:aws:iam::${AWS::AccountId}:root"
-              - !Ref TerraformAdminRole
+          Principal: "*"
           Action:
             - "s3:*"
           Resource:
             - !Sub '${S3Bucket.Arn}/*'
             - !Sub '${S3Bucket.Arn}'
-        - Sid: Allow to specific roles
-          Effect: Allow
-          Principal:
-            AWS:
-              - !Sub "arn:aws:iam::${AWS::AccountId}:root"
-              - !Ref TerraformAdminRole
-          Action:
-            - "s3:*"
-          Resource:
-            - !Sub '${S3Bucket.Arn}/*'
-            - !Sub '${S3Bucket.Arn}'
+          Condition:
+            "ArnNotLike":
+              aws:PrincipalArn:
+                - !Ref TerraformDeployRole
+            "StringNotLike":
+              aws:userId:
+              - !Sub "${AdminRoleId}:*"
+              - !Sub "${AWS::AccountId}"
+
         - !If
-          - isRolePresent
+          - isTfDeployRolePresent
           - Sid: Terraform deploy access
             Effect: Allow
-            Principal:
-              AWS:
-                - !Ref TerraformDeployRole
+            Principal: "*"
             Action:
               - "s3:ListBucket"
-            Resource: !Sub '${S3Bucket.Arn}'
-          - !Ref AWS::NoValue
-        - !If
-          - isRolePresent
-          - Sid: Terraform deploy access
-            Effect: Allow
-            Principal:
-              AWS:
-                - !Ref TerraformDeployRole
-            Action:
               - "s3:GetObject"
               - "s3:PutObject"
               - "s3:DeleteObject"
-            Resource: !Sub '${S3Bucket.Arn}/*'
+              - "s3:GetEncryptionConfiguration"
+              - "s3:GetBucketVersioning"
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "ArnLike":
+                aws:PrincipalArn:
+                  - !Ref TerraformDeployRole
           - !Ref AWS::NoValue
-        - Sid: Enforce MFA
-          Effect: Deny
-          Principal: '*'
-          Action:
-            - "s3:*"
-          Resource: !Sub '${S3Bucket.Arn}/*'
-          Condition:
-            "Null":
-              aws:MultiFactorAuthAge: "true"
-        - Sid: Deny requests if mutlifactor age is greater than 1800 seconds
-          Effect: Deny
-          Principal: '*'
-          Action:
-            - "s3:*"
-          Resource: !Sub '${S3Bucket.Arn}/*'
-          Condition:
-            "NumericGreaterThan":
-              aws:MultiFactorAuthAge: "1800"
+
+        - !If
+          - isEnforceMfaEnabled
+          - Sid: Enforce MFA
+            Effect: Deny
+            NotPrincipal:
+              AWS:
+                - !Ref TerraformDeployRole
+            Action:
+              - "s3:*"
+            Resource: !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "Null":
+                aws:MultiFactorAuthAge: "true"
+          - !Ref AWS::NoValue
+        - !If
+          - isEnforceMfaEnabled
+          - Sid: Deny requests if mutlifactor age is greater than 1800 seconds
+            Effect: Deny
+            NotPrincipal:
+              AWS:
+                - !Ref TerraformDeployRole
+            Action:
+              - "s3:*"
+            Resource: !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "NumericGreaterThan":
+                aws:MultiFactorAuthAge: "1800"
+          - !Ref AWS::NoValue
+
         - Sid: DenyPublicReadAcl
+          Effect: Deny
           Action:
             - 's3:PutBucketAcl'
             - 's3:PutObject'
@@ -120,12 +131,12 @@ Resources:
                 - authenticated-read
                 - public-read
                 - public-read-write
-          Effect: Deny
           Principal: '*'
           Resource:
             - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
             - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}/*'
         - Sid: DenyGrantingPublicRead
+          Effect: Deny
           Action:
             - 's3:PutBucketAcl'
             - 's3:PutObject'
@@ -135,11 +146,11 @@ Resources:
               's3:x-amz-grant-read':
                 - '*http://acs.amazonaws.com/groups/global/AllUsers*'
                 - '*http://acs.amazonaws.com/groups/global/AuthenticatedUsers*'
-          Effect: Deny
           Principal: '*'
           Resource:
             - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
             - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}/*'
+
         - Sid: Deny requests that do not use TLS
           Effect: Deny
           Principal: '*'
