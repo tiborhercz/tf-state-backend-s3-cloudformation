@@ -10,7 +10,7 @@ Parameters:
     Description: "IAM role ARN. IAM role for deploying (CI/CD)"
   AdminRoleId:
     Type: String
-    Description: "The Admin role ID. The role ID looks like: AROAEXAMPLEID. Which you can get from the AWS CLI using: aws iam get-role --role-name AWSReservedSSO_TerraformAdmin_ed4db3d613026e37"
+    Description: "The Admin role ID. The role ID looks like: AROAEXAMPLEID. Which you can get from the AWS CLI using: aws iam get-role --role-name ROLE_NAME_HERE"
   EnforceMfaEnabled:
     Type: String
     Default: 'true'
@@ -94,9 +94,7 @@ Resources:
           - isEnforceMfaEnabled
           - Sid: Enforce MFA
             Effect: Deny
-            NotPrincipal:
-              AWS:
-                - !Ref TerraformDeployRole
+            Principal: "*"
             Action:
               - "s3:*"
             Resource: !Sub '${S3Bucket.Arn}/*'
@@ -108,9 +106,7 @@ Resources:
           - isEnforceMfaEnabled
           - Sid: Deny requests if mutlifactor age is greater than 1800 seconds
             Effect: Deny
-            NotPrincipal:
-              AWS:
-                - !Ref TerraformDeployRole
+            Principal: "*"
             Action:
               - "s3:*"
             Resource: !Sub '${S3Bucket.Arn}/*'
