@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: |-
   Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state.
+  This template has strict permissions for added security.
 Parameters:
   KMSMasterKeyID:
     Type: String
