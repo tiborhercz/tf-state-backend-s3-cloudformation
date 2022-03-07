@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |-
+  Template for creating a S3 bucket for storing the Terraform state and DynamoDB table locking the state.
+  This template has strict permissions for added security.
+Parameters:
+  KMSMasterKeyID:
+    Type: String
+    Description: "KMS Master Key ID. You can specify the key ID or the Amazon Resource Name (ARN) of the CMK. Example: 1bcre5b2-4235-gce5-9fd5-h22e3q3g54gd"
+  TerraformDeployRole:
+    Type: String
+    Description: "IAM role ARN. IAM role for deploying (CI/CD)"
+  AdminRoleId:
+    Type: String
+    Description: "The Admin role ID. The role ID looks like: AROAEXAMPLEID. Which you can get from the AWS CLI using: aws iam get-role --role-name ROLE_NAME_HERE"
+  EnforceMfaEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: "Enforce MFA on any action on the bucket"
+
+Conditions:
+  isEnforceMfaEnabled: !Equals
+        - !Ref EnforceMfaEnabled
+        - "true"
+  isTfDeployRolePresent: !Not
+    - !Equals
+        - !Ref TerraformDeployRole
+        - ""
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSMasterKeyID
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+        - Sid: Deny all access
+          Effect: Deny
+          Principal: "*"
+          Action:
+            - "s3:*"
+          Resource:
+            - !Sub '${S3Bucket.Arn}/*'
+            - !Sub '${S3Bucket.Arn}'
+          Condition:
+            "ArnNotLike":
+              aws:PrincipalArn:
+                - !Ref TerraformDeployRole
+            "StringNotLike":
+              aws:userId:
+              - !Sub "${AdminRoleId}:*"
+              - !Sub "${AWS::AccountId}"
+
+        - !If
+          - isTfDeployRolePresent
+          - Sid: Terraform deploy access
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:GetEncryptionConfiguration"
+              - "s3:GetBucketVersioning"
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "ArnLike":
+                aws:PrincipalArn:
+                  - !Ref TerraformDeployRole
+          - !Ref AWS::NoValue
+
+        - !If
+          - isEnforceMfaEnabled
+          - Sid: Enforce MFA
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - "s3:*"
+            Resource: !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "Null":
+                aws:MultiFactorAuthAge: "true"
+          - !Ref AWS::NoValue
+        - !If
+          - isEnforceMfaEnabled
+          - Sid: Deny requests if mutlifactor age is greater than 1800 seconds
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - "s3:*"
+            Resource: !Sub '${S3Bucket.Arn}/*'
+            Condition:
+              "NumericGreaterThan":
+                aws:MultiFactorAuthAge: "1800"
+          - !Ref AWS::NoValue
+
+        - Sid: DenyPublicReadAcl
+          Effect: Deny
+          Action:
+            - 's3:PutBucketAcl'
+            - 's3:PutObject'
+            - 's3:PutObjectAcl'
+          Condition:
+            StringEquals:
+              's3:x-amz-acl':
+                - authenticated-read
+                - public-read
+                - public-read-write
+          Principal: '*'
+          Resource:
+            - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
+            - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}/*'
+        - Sid: DenyGrantingPublicRead
+          Effect: Deny
+          Action:
+            - 's3:PutBucketAcl'
+            - 's3:PutObject'
+            - 's3:PutObjectAcl'
+          Condition:
+            StringLike:
+              's3:x-amz-grant-read':
+                - '*http://acs.amazonaws.com/groups/global/AllUsers*'
+                - '*http://acs.amazonaws.com/groups/global/AuthenticatedUsers*'
+          Principal: '*'
+          Resource:
+            - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
+            - !Sub 'arn:${AWS::Partition}:s3:::tf-state-bucket-${AWS::AccountId}-${AWS::Region}/*'
+
+        - Sid: Deny requests that do not use TLS
+          Effect: Deny
+          Principal: '*'
+          Action:
+            - "s3:*"
+          Resource: !Sub '${S3Bucket.Arn}/*'
+          Condition:
+            Bool:
+              'aws:SecureTransport': 'false'
+        - Sid: Deny object uploads not using default encryption settings
+          Effect: Deny
+          Principal: '*'
+          Action:
+            - "s3:PutObject"
+          Resource: !Sub '${S3Bucket.Arn}/*'
+          Condition:
+            'Null':
+              s3:x-amz-server-side-encryption: false
+            StringNotEqualsIfExists:
+              s3:x-amz-server-side-encryption:
+                - 'aws:kms'
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub tf-state-table-${AWS::AccountId}
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        # Cloudformation doesn't support automatically tagging of DynamoDB
+        - Key: aws-cloudformation-logical-id
+          Value: "TerraformStateLockDynamoDBTable"
+        - Key: aws-cloudformation-stack-id
+          Value: !Ref "AWS::StackId"
+        - Key: aws-cloudformation-stack-name
+          Value: !Ref "AWS::StackName"
+
+  trailDataS3Bucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'tf-state-cloudtrail-bucket-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  trail:
+    Type: "AWS::CloudTrail::Trail"
+    DependsOn:
+      - trailBucketPolicy
+    Properties:
+      TrailName: !Sub "tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
+      S3BucketName: !Ref trailDataS3Bucket
+      IsLogging: true
+      EventSelectors:
+        - DataResources:
+            - Type: "AWS::S3::Object"
+              Values:
+                - !Sub "${S3Bucket.Arn}/"
+          IncludeManagementEvents: true
+          ReadWriteType: All
+
+  trailBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref trailDataS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Sid: AWSCloudTrailAclCheck
+          Effect: Allow
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action: "s3:GetBucketAcl"
+          Resource: !GetAtt trailDataS3Bucket.Arn
+        - Sid: AWSCloudTrailWrite
+          Effect: Allow
+          Principal:
+            Service: "cloudtrail.amazonaws.com"
+          Action: "s3:PutObject"
+          Resource: !Sub "arn:${AWS::Partition}:s3:::${trailDataS3Bucket}/AWSLogs/${AWS::AccountId}/*"
+          Condition:
+            StringEquals:
+              "s3:x-amz-acl": "bucket-owner-full-control"
+              "aws:SourceArn": !Sub "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/tf-state-logging-bucket-${AWS::AccountId}-${AWS::Region}"
+
+Outputs:
+  TerraformStateS3BucketName:
+    Value: !Sub 'tf-state-bucket-${AWS::AccountId}-${AWS::Region}'
+    Description: Name of the S3 bucket
+  TerraformStateLockDynamoDBTableName:
+    Value: !Sub tf-state-table-${AWS::AccountId}
+    Description: Name of the DynamoDB table
